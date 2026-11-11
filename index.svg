@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;min-height:100vh;margin:0;padding:32px;background:#000;color:#ddd;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace">
+      <h2 style="margin:0 0 8px;font-weight:600">paroxysm spike (milestone 0)</h2>
+      <p style="margin:0 0 20px;color:#888">Throwaway feasibility test. No proxy code in here.</p>
+      <div id="homes" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px"></div>
+      <pre id="out" style="white-space:pre-wrap;margin:0 0 20px"></pre>
+      <div id="actions" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px"></div>
+      <div style="color:#888;margin-bottom:6px">Results JSON (select all, copy, paste back to Claude):</div>
+      <textarea id="json" readonly="readonly" rows="14" style="width:100%;box-sizing:border-box;background:#0a0a0a;color:#ddd;border:1px solid #222;padding:12px;font:12px ui-monospace,Menlo,Consolas,monospace"></textarea>
+    </div>
+  </foreignObject>
+  <script><![CDATA[
+(function () {
+  // ---- EDIT THESE THREE LINES BEFORE UPLOADING ------------------------------
+  var OWNER = "YOUR_GITHUB_USERNAME";
+  var REPO  = "paroxysm-spike";
+  var REF   = "main";
+  // ---------------------------------------------------------------------------
+  var WISP  = "wss://api.scvmath.org/wi/";
+  var HOMES = [
+    { name: "jsDelivr",     url: "https://cdn.jsdelivr.net/gh/" + OWNER + "/" + REPO + "@" + REF + "/" },
+    { name: "GitHub Pages", url: "https://" + OWNER.toLowerCase() + ".github.io/" + REPO + "/" }
+  ];
+
+  var XHTML = "http://www.w3.org/1999/xhtml";
+  var out = document.getElementById("out");
+  var jsonBox = document.getElementById("json");
+  var results = { spike: "paroxysm-m0", when: new Date().toISOString(), tests: {} };
+
+  function el(tag, attrs, text) {
+    var e = document.createElementNS(XHTML, tag);
+    for (var k in attrs || {}) e.setAttribute(k, attrs[k]);
+    if (text) e.textContent = text;
+    return e;
+  }
+  function render() {
+    var lines = [];
+    for (var k in results.tests) {
+      var t = results.tests[k];
+      lines.push((t.ok === true ? "[PASS] " : t.ok === false ? "[FAIL] " : "[INFO] ") + k + (t.detail ? "  " + t.detail : ""));
+    }
+    out.textContent = lines.join("\n");
+    jsonBox.value = JSON.stringify(results, null, 2);
+  }
+  function rec(name, ok, detail, extra) {
+    results.tests[name] = { ok: ok, detail: detail || "" };
+    if (extra) results.tests[name].data = extra;
+    render();
+  }
+  function withTimeout(p, ms, label) {
+    return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(label + " timed out after " + ms + " ms")); }, ms); })]);
+  }
+  function base() { return location.href.split("#")[0].split("?")[0].replace(/[^\/]*$/, ""); }
+
+  // ---- T1 environment -------------------------------------------------------
+  var proto = location.protocol;
+  rec("T1 environment", null, proto + " secure=" + window.isSecureContext + " serviceWorker-in-navigator=" + ("serviceWorker" in navigator) + " contentType=" + document.contentType, {
+    href: location.href, protocol: proto, isSecureContext: window.isSecureContext,
+    serviceWorkerInNavigator: "serviceWorker" in navigator, typeofServiceWorker: typeof navigator.serviceWorker,
+    contentType: document.contentType, origin: window.origin, userAgent: navigator.userAgent
+  });
+
+  // ---- mirror buttons -------------------------------------------------------
+  var homesEl = document.getElementById("homes");
+  HOMES.forEach(function (h) {
+    var b = el("button", { style: "padding:10px 16px;background:#111;color:#ddd;border:1px solid #333;border-radius:8px;cursor:pointer;font:inherit" }, "open " + h.name + " copy");
+    b.addEventListener("click", function () { location.href = h.url + "index.svg"; });
+    homesEl.appendChild(b);
+  });
+
+  // ---- T9 storage APIs ------------------------------------------------------
+  try { rec("T9 Cache Storage + IndexedDB", !!(window.caches && window.indexedDB), "caches=" + !!window.caches + " indexedDB=" + !!window.indexedDB); } catch (e) { rec("T9 Cache Storage + IndexedDB", false, String(e)); }
+
+  // ---- T8 WISP WebSocket from this origin ----------------------------------
+  function testWisp() {
+    return withTimeout(new Promise(function (res, rej) {
+      var ws = new WebSocket(WISP), got = [];
+      ws.binaryType = "arraybuffer";
+      ws.onopen = function () { got.push("open"); };
+      ws.onmessage = function (m) { got.push("message(" + (m.data.byteLength || m.data.length) + "B)"); setTimeout(function () { ws.close(); res(got.join(", ")); }, 200); };
+      ws.onerror = function () { rej(new Error("WebSocket error (" + got.join(", ") + ")")); };
+      ws.onclose = function (c) { if (got.length && !got.some(function (x) { return x.indexOf("message") === 0; })) res(got.join(", ") + ", closed " + c.code); };
+    }), 10000, "WISP").then(
+      function (d) { rec("T8 WISP " + WISP, true, d); },
+      function (e) { rec("T8 WISP " + WISP, false, e.message); });
+  }
+
+  // ---- service worker tests -------------------------------------------------
+  function headerProbe(url, name) {
+    return fetch(url, { cache: "no-store" }).then(function (r) {
+      var h = {};
+      ["content-type", "content-security-policy", "x-content-type-options", "access-control-allow-origin", "service-worker-allowed", "cache-control"].forEach(function (k) { h[k] = r.headers.get(k); });
+      rec("T2 headers " + name, r.ok, r.status + " type=" + h["content-type"] + " csp=" + h["content-security-policy"], h);
+    }).catch(function (e) { rec("T2 headers " + name, false, e.message); });
+  }
+
+  function swTests() {
+    if (!("serviceWorker" in navigator)) {
+      rec("T3 service worker register", false, "navigator.serviceWorker is undefined here (expected on file://)");
+      return Promise.resolve();
+    }
+    var swUrl = base() + "spike-sw.js";
+    return withTimeout(navigator.serviceWorker.register(swUrl), 10000, "register").then(function (reg) {
+      rec("T3 service worker register", true, "scope=" + reg.scope, { scope: reg.scope, script: swUrl });
+      return withTimeout(navigator.serviceWorker.ready, 10000, "ready");
+    }).then(function (reg) {
+      rec("T3b service worker ready", true, "active state=" + (reg.active && reg.active.state));
+      // T4 capability probes, answered by the worker after install
+      return withTimeout(new Promise(function (res) {
+        navigator.serviceWorker.addEventListener("message", function h(e) {
+          if (e.data && e.data.type === "probe-result") { navigator.serviceWorker.removeEventListener("message", h); res(e.data.result); }
+        });
+        reg.active.postMessage({ type: "probe" });
+      }), 8000, "worker probe");
+    }).then(function (r) {
+      rec("T4a new Function() inside the worker", r.newFunction === "allowed", r.newFunction, r);
+      rec("T4b importScripts() after install", null, r.importScriptsAfterInstall + " (blocked is the expected result)");
+    }).then(function () {
+      // T6 SW-synthesised text/html
+      return fetch(base() + "virtual.html", { cache: "no-store" }).then(function (r) {
+        return r.text().then(function (t) {
+          var ct = r.headers.get("content-type") || "";
+          rec("T6 worker-synthesised text/html (fetch)", r.ok && /text\/html/.test(ct) && t.indexOf("synthesised") > -1, r.status + " " + ct);
+        });
+      });
+    }).then(function () {
+      // T7 proxy-style path inside scope, loaded as a real navigation (iframe)
+      return withTimeout(new Promise(function (res, rej) {
+        var f = el("iframe", { style: "display:none" });
+        f.addEventListener("load", function () {
+          try { var txt = f.contentDocument.body.textContent; f.remove(); res(txt); } catch (e) { rej(e); }
+        });
+        f.src = base() + "~/sj/spike/frame1/https://example.com/a?b=c";
+        document.documentElement.appendChild(f);
+      }), 8000, "prefix iframe").then(
+        function (txt) { rec("T7 proxy-style path navigation (~/sj/.../https://...)", /prefix-ok/.test(txt), txt.slice(0, 80)); },
+        function (e) { rec("T7 proxy-style path navigation (~/sj/.../https://...)", false, e.message); });
+    }).then(function () {
+      var a = el("a", { href: "./virtual.html", style: "padding:10px 16px;background:#111;color:#8cf;border:1px solid #333;border-radius:8px;text-decoration:none" }, "T6b: open virtual.html as a top-level page");
+      document.getElementById("actions").appendChild(a);
+      rec("T5 controlled by worker", null, "controller=" + !!navigator.serviceWorker.controller + " (false on first load is normal; reload once)");
+    }).catch(function (e) { rec("T3 service worker register", false, e.message); });
+  }
+
+  var https = /^https?:$/.test(proto);
+  var chain = Promise.resolve();
+  if (https) {
+    chain = chain.then(function () { return headerProbe(location.href.split("#")[0].split("?")[0], "this page"); })
+                 .then(function () { return headerProbe(base() + "spike-sw.js", "spike-sw.js"); });
+  } else {
+    rec("T2 headers", null, "skipped on " + proto + " (open one of the mirror copies to record headers)");
+  }
+  chain.then(swTests).then(testWisp).then(function () { rec("DONE", null, "all tests finished"); });
+})();
+  ]]></script>
+</svg>
