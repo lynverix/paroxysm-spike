@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <title>paroxysm m4 frame</title>
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;min-height:100vh;margin:0;padding:20px;background:#0b0710;color:#ddd;font:13px/1.5 ui-monospace,Consolas,monospace">
+      <h3 style="margin:0 0 8px;font-weight:600">paroxysm m4 spike: frame.svg (HTTPS copy)</h3>
+      <div id="msg" style="margin:0 0 12px;color:#c9a6ec"></div>
+      <pre id="out" style="white-space:pre-wrap;margin:0"></pre>
+    </div>
+  </foreignObject>
+  <script><![CDATA[
+(async () => {
+    const q = new URLSearchParams(location.search);
+    const h = new URLSearchParams(location.hash.slice(1));
+    const ld0 = q.get("ld") === "0";
+    const forceNosw = h.has("nosw") || q.has("nosw");
+    const framed = window.parent !== window;
+    const report = {};
+    const out = document.getElementById("out");
+    const msg = document.getElementById("msg");
+    const send = (type, data) => { if (framed) parent.postMessage({ spike: "m4", from: "frame", type, data }, "*"); };
+    const rec = (k, v) => { report[k] = v; out.textContent = JSON.stringify(report, null, 2); send("result", { [k]: v }); };
+    const timeout = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + " timed out after " + ms + " ms")), ms))]);
+    const nosw = reason => {
+        rec("nosw", reason);
+        if (framed) { msg.textContent = "No service worker in the iframe: asking the outer page to redirect (nosw)."; parent.postMessage({ ld: "nosw" }, "*"); }
+        else if (ld0) msg.textContent = "Service workers are unavailable here too. ld=0 is set, so no further redirect (no loop).";
+        else msg.textContent = "Service workers are unavailable.";
+    };
+
+    addEventListener("message", e => {
+        if (e.source !== parent || e.data?.type !== "hello") return;
+        rec("helloFromOuter", { eventOrigin: e.origin, sourceIsParent: true });
+    });
+
+    rec("env", {
+        href: location.href, framed, ld0, forceNosw, origin: location.origin, isSecureContext,
+        ancestorOrigins: location.ancestorOrigins ? [...location.ancestorOrigins] : "n/a",
+        referrer: document.referrer, contentType: document.contentType,
+        serviceWorkerInNavigator: "serviceWorker" in navigator,
+        controlledOnLoad: !!navigator.serviceWorker?.controller,
+        userAgent: navigator.userAgent
+    });
+
+    if (forceNosw) { nosw("forced by #nosw for the fallback test"); return; }
+
+    rec("storage", await storageCheck(true));
+
+    if (!navigator.serviceWorker) { nosw("navigator.serviceWorker is missing"); return; }
+    let existing = null;
+    try { existing = await navigator.serviceWorker.getRegistration(); } catch (e) { existing = "error: " + e.message; }
+    rec("registrationBeforeRegister", existing && typeof existing === "object" ? { scope: existing.scope, active: !!existing.active } : existing);
+    let reg;
+    try {
+        reg = await timeout(navigator.serviceWorker.register("sw.js"), 10000, "register");
+        rec("register", { ok: true, scope: reg.scope });
+        await timeout(navigator.serviceWorker.ready, 10000, "ready");
+    } catch (e) {
+        rec("register", { ok: false, error: e.name + ": " + e.message });
+        nosw("register failed: " + e.message);
+        return;
+    }
+    const sw = navigator.serviceWorker.controller || reg.active;
+    try {
+        const pong = await timeout(new Promise(res => {
+            const id = Math.random();
+            navigator.serviceWorker.addEventListener("message", function f(e) { if (e.data?.id === id) { navigator.serviceWorker.removeEventListener("message", f); res(e.data); } });
+            sw.postMessage({ type: "ping", id });
+        }), 8000, "ping");
+        rec("worker", { born: pong.born, scope: pong.scope, controlledNow: !!navigator.serviceWorker.controller });
+    } catch (e) { rec("worker", { error: e.message }); }
+
+    send("frame-done", report);
+    msg.textContent = "Worker ready. Opening app.html (served by the worker) in 1 s…";
+    setTimeout(() => location.replace("app.html" + location.search + location.hash), 1000);
+
+    async function storageCheck(write) {
+        const r = {};
+        const KEY = "paroxysm-spike:m4";
+        try {
+            const prev = JSON.parse(localStorage.getItem(KEY) || "null");
+            r.localStorage = { previous: prev };
+            if (write) localStorage.setItem(KEY, JSON.stringify({ runs: (prev?.runs || 0) + 1, last: Date.now() }));
+        } catch (e) { r.localStorage = { error: String(e) }; }
+        try {
+            r.indexedDB = await new Promise((res, rej) => {
+                const o = indexedDB.open("paroxysm-spike-m4", 1);
+                o.onupgradeneeded = () => o.result.createObjectStore("kv");
+                o.onerror = () => rej(o.error);
+                o.onsuccess = () => {
+                    const db = o.result, tx = db.transaction("kv", "readwrite"), st = tx.objectStore("kv"), g = st.get("last");
+                    g.onsuccess = () => {
+                        const previous = g.result ?? null;
+                        if (write) st.put(Date.now(), "last");
+                        tx.oncomplete = () => { db.close(); res({ previous }); };
+                    };
+                    tx.onerror = () => rej(tx.error);
+                };
+            });
+        } catch (e) { r.indexedDB = { error: String(e) }; }
+        try {
+            const c = await caches.open("paroxysm-spike-m4");
+            const m = await c.match("marker");
+            r.cacheStorage = { previous: m ? Number(await m.text()) : null };
+            if (write) await c.put("marker", new Response(String(Date.now())));
+        } catch (e) { r.cacheStorage = { error: String(e) }; }
+        try { r.estimate = await navigator.storage.estimate(); r.persisted = await navigator.storage.persisted(); } catch (e) { r.estimate = String(e); }
+        try { r.hasStorageAccess = document.hasStorageAccess ? await document.hasStorageAccess() : "n/a"; } catch (e) { r.hasStorageAccess = String(e); }
+        try { document.cookie = "spikem4=1; SameSite=None; Secure; Max-Age=600"; r.cookieWritable = document.cookie.includes("spikem4=1"); } catch (e) { r.cookieWritable = String(e); }
+        return r;
+    }
+})();
+  ]]></script>
+</svg>

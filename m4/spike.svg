@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <title>paroxysm m4 spike</title>
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;height:100vh;margin:0;display:flex;flex-direction:column;background:#000;color:#ddd;font:13px/1.5 ui-monospace,Consolas,monospace">
+      <div style="flex:0 0 auto;max-height:44vh;overflow:auto;padding:16px 20px;border-bottom:1px solid #2a1f35">
+        <h3 style="margin:0 0 6px;font-weight:600">paroxysm m4 spike: outer spike.svg (open from disk)</h3>
+        <div id="modes" style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px"></div>
+        <pre id="out" style="white-space:pre-wrap;margin:0 0 10px"></pre>
+        <div style="color:#888;margin:0 0 4px">Results JSON (select all, copy, paste back):</div>
+        <textarea id="json" readonly="readonly" rows="8" style="width:100%;box-sizing:border-box;background:#0a0a0a;color:#ddd;border:1px solid #2a1f35;padding:10px;font:12px ui-monospace,Consolas,monospace"></textarea>
+      </div>
+      <div id="slot" style="flex:1 1 auto;min-height:0;display:flex"></div>
+    </div>
+  </foreignObject>
+  <script><![CDATA[
+(() => {
+    const REF = "main";
+    const XHTML = "http://www.w3.org/1999/xhtml";
+    const h = new URLSearchParams(location.hash.slice(1));
+    const HOME = h.get("home") || "https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@" + REF + "/m4/";
+    const forceNosw = h.has("nosw");
+    const noAllow = h.has("noallow");
+    const ALLOW = "fullscreen; autoplay; clipboard-read; clipboard-write; microphone; camera; display-capture; encrypted-media; picture-in-picture; gamepad; screen-wake-lock";
+    const results = { spike: "paroxysm-m4", when: new Date().toISOString(), home: HOME, mode: { forceNosw, noAllow }, outer: {}, frame: {}, app: {}, events: [] };
+    const out = document.getElementById("out");
+    const json = document.getElementById("json");
+    const t0 = performance.now();
+    let heard = false;
+
+    const el = (tag, attrs = {}, text = "") => {
+        const e = document.createElementNS(XHTML, tag);
+        for (const k in attrs) e.setAttribute(k, attrs[k]);
+        if (text) e.textContent = text;
+        return e;
+    };
+    const render = () => {
+        const f = results.frame, a = results.app;
+        out.textContent = [
+            "outer: " + results.outer.protocol + " register on this page: " + (results.outer.register ?? "…"),
+            "frame: register " + (f.register ? JSON.stringify(f.register) : "…") + (f.nosw ? "  nosw: " + f.nosw : ""),
+            "frame: storage previous runs " + JSON.stringify(f.storage?.localStorage?.previous ?? null) + ", registration before register " + JSON.stringify(f.registrationBeforeRegister ?? null),
+            "app: " + (a.env ? "contentType " + a.env.contentType + ", controlled " + a.env.controlled + ", servedByWorker " + a.env.servedByWorker : "…"),
+            "app: sjPath " + JSON.stringify(a.sjPath ?? "…") + ", wisp " + JSON.stringify(a.wisp ?? "…"),
+            "events: " + results.events.slice(-4).map(e => e.at + "s " + e.what).join(" | ")
+        ].join("\n");
+        json.value = JSON.stringify(results, null, 2);
+    };
+    const event = what => { results.events.push({ at: ((performance.now() - t0) / 1000).toFixed(1), what }); render(); };
+
+    [["Normal", ""], ["Force nosw", "nosw"], ["No allow list", "noallow"]].forEach(([label, mode]) => {
+        const b = el("button", { style: "padding:6px 12px;background:#140d1c;color:#ddd;border:1px solid #3a2a4a;border-radius:999px;font:inherit;cursor:pointer" }, label);
+        b.addEventListener("click", () => {
+            const p = new URLSearchParams();
+            if (h.get("home")) p.set("home", h.get("home"));
+            if (mode) p.set(mode, "1");
+            location.hash = p.toString();
+            location.reload();
+        });
+        document.getElementById("modes").append(b);
+    });
+
+    results.outer = { protocol: location.protocol, href: location.href, origin: window.origin, isSecureContext, serviceWorkerInNavigator: "serviceWorker" in navigator, userAgent: navigator.userAgent };
+    if (navigator.serviceWorker) {
+        navigator.serviceWorker.register("sw.js").then(
+            () => { results.outer.register = "succeeded (unexpected on file://)"; render(); },
+            e => { results.outer.register = "failed: " + e.name + ": " + e.message; render(); });
+    } else results.outer.register = "navigator.serviceWorker missing";
+
+    const frame = el("iframe", { src: HOME + "frame.svg" + (forceNosw ? "#nosw" : ""), style: "flex:1 1 auto;border:0;width:100%;height:100%;background:#0b0710" });
+    if (!noAllow) frame.setAttribute("allow", ALLOW);
+    let loads = 0;
+    frame.addEventListener("load", () => {
+        loads++;
+        event("iframe load #" + loads);
+        frame.contentWindow.postMessage({ type: "hello" }, "*");
+    });
+    document.getElementById("slot").append(frame);
+    event("iframe created, allow=" + (noAllow ? "none" : "Fern list"));
+    setTimeout(() => { if (!heard) event("no message from the iframe within 20 s (blocked or slow?)"); }, 20000);
+
+    addEventListener("message", e => {
+        if (e.source !== frame.contentWindow) return;
+        heard = true;
+        const d = e.data || {};
+        if (d.ld === "nosw") {
+            event("nosw received, redirecting to " + HOME + "frame.svg?ld=0 in 1.5 s");
+            setTimeout(() => location.replace(HOME + "frame.svg?ld=0" + (forceNosw ? "&nosw=1" : "")), 1500);
+            return;
+        }
+        if (d.spike !== "m4") return;
+        if (d.type === "result") Object.assign(results[d.from], d.data);
+        else if (d.type === "title") { document.title = d.data; event("title set to " + d.data + " (now " + document.title + ")"); }
+        else if (d.type === "icon") {
+            document.querySelectorAll("link[rel=icon]").forEach(l => l.remove());
+            document.documentElement.append(el("link", { rel: "icon", href: d.data }));
+            event("icon link added to the SVG document");
+        } else if (d.type === "panic") { event("panic: outer navigates itself"); location.replace(d.data); }
+        else event(d.from + " " + d.type + " (origin seen by outer: " + e.origin + ")");
+        render();
+    });
+    render();
+})();
+  ]]></script>
+</svg>

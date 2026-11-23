@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>paroxysm m4 app</title>
+<style>
+    body { margin: 0; padding: 20px; background: #0b0710; color: #ddd; font: 13px/1.5 ui-monospace, Consolas, monospace; }
+    h3 { margin: 0 0 8px; font-weight: 600; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+    button { padding: 7px 12px; background: #1a1222; color: #ddd; border: 1px solid #3a2a4a; border-radius: 999px; font: inherit; cursor: pointer; }
+    pre { white-space: pre-wrap; margin: 0; }
+    #note { color: #c9a6ec; margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<h3>paroxysm m4 spike: app.html (should be served by the worker)</h3>
+<div id="note"></div>
+<div class="row">
+    <button id="ping">Ping worker (restart check)</button>
+    <button id="sj">Load ~/sj/ path</button>
+    <button id="fs">Fullscreen</button>
+    <button id="clipW">Clipboard write</button>
+    <button id="clipR">Clipboard read</button>
+    <button id="title">Set outer title (message)</button>
+    <button id="icon">Set outer icon (message)</button>
+    <button id="reload">Reload this frame</button>
+    <button id="panicMsg">Panic via message</button>
+    <button id="panicTop">Panic via top.location</button>
+</div>
+<pre id="out"></pre>
+<script>
+(async () => {
+    const framed = window.parent !== window;
+    const report = {};
+    const out = document.getElementById("out");
+    const note = document.getElementById("note");
+    const send = (type, data) => { if (framed) parent.postMessage({ spike: "m4", from: "app", type, data }, "*"); };
+    const rec = (k, v) => { report[k] = v; out.textContent = JSON.stringify(report, null, 2); send("result", { [k]: v }); };
+    const timeout = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + " timed out after " + ms + " ms")), ms))]);
+    const sw = navigator.serviceWorker;
+    const FEATURES = ["fullscreen", "autoplay", "clipboard-read", "clipboard-write", "microphone", "camera", "display-capture", "encrypted-media", "picture-in-picture", "gamepad", "screen-wake-lock"];
+    const PANIC = "https://example.com/";
+    let firstBorn = null;
+
+    addEventListener("message", e => {
+        if (e.source !== parent || e.data?.type !== "hello") return;
+        rec("helloFromOuter", { eventOrigin: e.origin, sourceIsParent: true });
+    });
+
+    const nav = performance.getEntriesByType("navigation")[0];
+    const fp = document.featurePolicy;
+    let ls = null;
+    try { ls = JSON.parse(localStorage.getItem("paroxysm-spike:m4") || "null"); } catch (e) { ls = String(e); }
+    rec("env", {
+        href: location.href, framed, contentType: document.contentType,
+        controlled: !!sw?.controller,
+        servedByWorker: nav ? nav.workerStart > 0 : "n/a",
+        ancestorOrigins: location.ancestorOrigins ? [...location.ancestorOrigins] : "n/a",
+        localStorageMarker: ls,
+        permissionsPolicy: fp ? Object.fromEntries(FEATURES.map(f => [f, fp.allowsFeature(f)])) : "document.featurePolicy missing",
+        autoplayPolicy: navigator.getAutoplayPolicy ? navigator.getAutoplayPolicy("mediaelement") : "n/a"
+    });
+    note.textContent = document.contentType === "text/html" && sw?.controller ? "Served as text/html by the worker, page is controlled." : "Not controlled or not text/html: see env.";
+
+    async function ping() {
+        const target = sw.controller || (await sw.ready).active;
+        return timeout(new Promise(res => {
+            const id = Math.random();
+            sw.addEventListener("message", function f(e) { if (e.data?.id === id) { sw.removeEventListener("message", f); res(e.data); } });
+            target.postMessage({ type: "ping", id });
+        }), 8000, "ping");
+    }
+
+    function loadSj() {
+        return timeout(new Promise((res, rej) => {
+            const f = document.createElement("iframe");
+            f.style.display = "none";
+            f.onload = () => { try { const t = f.contentDocument.body.textContent; f.remove(); res(t); } catch (e) { rej(e); } };
+            f.src = "~/sj/spike/frame1/" + encodeURIComponent("https://example.com/a?b=c");
+            document.body.append(f);
+        }), 8000, "~/sj iframe");
+    }
+
+    try { const p = await ping(); firstBorn = p.born; rec("worker", { born: p.born, scope: p.scope }); } catch (e) { rec("worker", { error: e.message }); }
+    try { const t = await loadSj(); rec("sjPath", { ok: /prefix-ok/.test(t), text: t.slice(0, 120) }); } catch (e) { rec("sjPath", { ok: false, error: e.message }); }
+    try {
+        const r = await fetch("born", { cache: "no-store" });
+        rec("fetchThroughWorker", { status: r.status, type: r.headers.get("content-type"), body: await r.text() });
+    } catch (e) { rec("fetchThroughWorker", { error: e.message }); }
+    try {
+        rec("wisp", await timeout(new Promise((res, rej) => {
+            const ws = new WebSocket("wss://api.scvmath.org/wi/"), got = [];
+            ws.binaryType = "arraybuffer";
+            ws.onopen = () => got.push("open");
+            ws.onmessage = m => { got.push("message " + m.data.byteLength + " B"); ws.close(); res(got.join(", ")); };
+            ws.onerror = () => rej(new Error("WebSocket error after: " + got.join(", ")));
+        }), 10000, "wisp"));
+    } catch (e) { rec("wisp", { error: e.message }); }
+    send("app-done", report);
+
+    const clicks = report.clicks = {};
+    const act = (id, fn) => document.getElementById(id).addEventListener("click", async () => {
+        try { clicks[id] = await fn(); } catch (e) { clicks[id] = "error: " + e.name + ": " + e.message; }
+        rec("clicks", clicks);
+    });
+    act("ping", async () => { const p = await ping(); return { born: p.born, restarted: p.born !== firstBorn, controlled: !!sw.controller, at: new Date().toISOString() }; });
+    act("sj", async () => (await loadSj()).slice(0, 80));
+    act("fs", async () => { await document.documentElement.requestFullscreen(); setTimeout(() => document.exitFullscreen().catch(() => {}), 1500); return "entered"; });
+    act("clipW", async () => { await navigator.clipboard.writeText("paroxysm m4 clipboard test"); return "written"; });
+    act("clipR", async () => "read " + (await navigator.clipboard.readText()).length + " chars");
+    act("title", async () => { send("title", "Untitled document - Google Docs"); return "sent; check the browser tab title"; });
+    act("icon", async () => { send("icon", "https://www.google.com/s2/favicons?domain=docs.google.com&sz=64"); return "sent; check the browser tab icon"; });
+    act("reload", async () => { location.reload(); return "reloading"; });
+    act("panicMsg", async () => { send("panic", PANIC); return "sent"; });
+    act("panicTop", async () => { top.location.replace(PANIC); return "called"; });
+    addEventListener("keydown", e => {
+        if (e.key !== "`") return;
+        try { top.location.replace(PANIC); clicks.panicKey = "called"; } catch (err) { clicks.panicKey = "error: " + err.message; }
+        rec("clicks", clicks);
+    });
+})();
+</script>
+</body>
+</html>
