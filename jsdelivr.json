@@ -1,0 +1,95 @@
+{
+  "spike": "paroxysm-m0",
+  "when": "2026-11-11T20:06:31.909Z",
+  "tests": {
+    "T1 environment": {
+      "ok": null,
+      "detail": "https: secure=true serviceWorker-in-navigator=true contentType=image/svg+xml",
+      "data": {
+        "href": "https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@main/index.svg",
+        "protocol": "https:",
+        "isSecureContext": true,
+        "serviceWorkerInNavigator": true,
+        "typeofServiceWorker": "object",
+        "contentType": "image/svg+xml",
+        "origin": "https://cdn.jsdelivr.net",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+      }
+    },
+    "T9 Cache Storage + IndexedDB": {
+      "ok": true,
+      "detail": "caches=true indexedDB=true"
+    },
+    "T2 headers this page": {
+      "ok": true,
+      "detail": "200 type=image/svg+xml csp=null",
+      "data": {
+        "content-type": "image/svg+xml",
+        "content-security-policy": null,
+        "x-content-type-options": "nosniff",
+        "access-control-allow-origin": "*",
+        "service-worker-allowed": null,
+        "cache-control": "public, max-age=604800, s-maxage=43200"
+      }
+    },
+    "T2 headers spike-sw.js": {
+      "ok": true,
+      "detail": "200 type=application/javascript; charset=utf-8 csp=null",
+      "data": {
+        "content-type": "application/javascript; charset=utf-8",
+        "content-security-policy": null,
+        "x-content-type-options": "nosniff",
+        "access-control-allow-origin": "*",
+        "service-worker-allowed": null,
+        "cache-control": "public, max-age=604800, s-maxage=43200"
+      }
+    },
+    "T3 service worker register": {
+      "ok": true,
+      "detail": "scope=https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@main/",
+      "data": {
+        "scope": "https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@main/",
+        "script": "https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@main/spike-sw.js"
+      }
+    },
+    "T3b service worker ready": {
+      "ok": true,
+      "detail": "active state=activated"
+    },
+    "T4a new Function() inside the worker": {
+      "ok": true,
+      "detail": "allowed",
+      "data": {
+        "version": "spike-1",
+        "scope": "https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@main/",
+        "newFunction": "allowed",
+        "indirectEval": "allowed",
+        "importScriptsAfterInstall": "blocked: NetworkError: Failed to execute 'importScripts' on 'WorkerGlobalScope': Failed to import 'https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@main/spike-extra.js'. importScripts() of new scripts after service worker installation is not allowed."
+      }
+    },
+    "T4b importScripts() after install": {
+      "ok": null,
+      "detail": "blocked: NetworkError: Failed to execute 'importScripts' on 'WorkerGlobalScope': Failed to import 'https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@main/spike-extra.js'. importScripts() of new scripts after service worker installation is not allowed. (blocked is the expected result)"
+    },
+    "T6 worker-synthesised text/html (fetch)": {
+      "ok": true,
+      "detail": "200 text/html; charset=utf-8"
+    },
+    "T7 proxy-style path navigation (~/sj/.../https://...)": {
+      "ok": true,
+      "detail": "prefix-ok:~/sj/spike/frame1/https://example.com/a"
+    },
+    "T5 controlled by worker": {
+      "ok": null,
+      "detail": "controller=true (false on first load is normal; reload once)"
+    },
+    "T8 WISP wss://api.scvmath.org/wi/": {
+      "ok": true,
+      "detail": "open, message(9B)"
+    },
+    "DONE": {
+      "ok": null,
+      "detail": "all tests finished"
+    }
+  }
+}
