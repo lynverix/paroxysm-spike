@@ -15,7 +15,7 @@
   </foreignObject>
   <script><![CDATA[
 (() => {
-    const REF = "main";
+    const REF = "c95d685b24d64f6bbda47d362a073b7a0ab55121";
     const XHTML = "http://www.w3.org/1999/xhtml";
     const h = new URLSearchParams(location.hash.slice(1));
     const HOME = h.get("home") || "https://cdn.jsdelivr.net/gh/lynverix/paroxysm-spike@" + REF + "/m4/";
