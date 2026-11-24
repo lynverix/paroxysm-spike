@@ -41,6 +41,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
+        # index.svg opened from disk races mirrors with fetch from origin null
+        self.send_header("Access-Control-Allow-Origin", "*")
         super().end_headers()
 
 
